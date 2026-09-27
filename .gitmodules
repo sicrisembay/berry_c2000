@@ -1,0 +1,3 @@
+[submodule "components/berry/berry"]
+	path = components/berry/berry
+	url = https://github.com/sicrisembay/berry.git
