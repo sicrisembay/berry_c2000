@@ -1,4 +1,10 @@
 eclipse.preferences.version=1
+encoding//Debug/components/drivers/DSP2833x_headers/v142/source/subdir_rules.mk=UTF-8
+encoding//Debug/components/drivers/DSP2833x_headers/v142/source/subdir_vars.mk=UTF-8
+encoding//Debug/components/drivers/uart/subdir_rules.mk=UTF-8
+encoding//Debug/components/drivers/uart/subdir_vars.mk=UTF-8
+encoding//Debug/components/utility/ringbuf/subdir_rules.mk=UTF-8
+encoding//Debug/components/utility/ringbuf/subdir_vars.mk=UTF-8
 encoding//Debug/makefile=UTF-8
 encoding//Debug/objects.mk=UTF-8
 encoding//Debug/sources.mk=UTF-8

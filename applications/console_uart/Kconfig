@@ -1,0 +1,3 @@
+mainmenu "Console Uart"
+
+rsource ../../components/drivers/Kconfig
