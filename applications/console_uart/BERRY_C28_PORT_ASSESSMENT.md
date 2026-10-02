@@ -45,11 +45,23 @@ Each phase has a concrete pass condition. Stop at a failed gate; do not layer la
 
 **Pass criteria:** The unmodified host build and tests pass, the exact Berry revision/config is recorded, and the new port work is isolated from the user's application edits.
 
+**Execution status (2026-10-02): PASS.** The separate Berry repository is clean on branch `c2000`, commit `4bf803a511ed8dc0c6d6d8447c77f9a33e84196d` (`Fix object register released too early when the key is an index expression (#551)`). At the freeze point, local `master` and `c2000` both referenced that same commit; no Berry source files were changed during this phase. The host config is `default/berry_conf.h`, Git blob `5178b95efd5711695359eb3d746f6e4d12825bc3`.
+
+The unmodified Berry sources built in Ubuntu 24.04 WSL with GCC 13.3.0 using debug, coverage, ASan, and UBSan instrumentation. The build omitted the optional readline dependency (the WSL image has no readline development headers) and invoked the repository's CRLF Python generator explicitly with `COC="python3 tools/coc/coc"`. All 58 `tests/*.be` scripts then ran directly under Linux with **0 failures**; this gives the bytecode `/tmp` and pointer tests their intended host environment. The successful build log and case summary are preserved outside the repositories at `%TEMP%\berry_phase0_build.log` and `%TEMP%\berry_phase0_cases.log`.
+
+Environment note: the stock `make test` command is not directly portable in this Windows checkout. MinGW's sanitizer libraries are absent; the Windows test runner also shells out to `./berry` and `lcov` through `cmd.exe`. WSL's stock build additionally needs readline headers and the CRLF generator workaround. The successful instrumented build and direct execution of every test case avoid those wrapper issues. WSL Git status was checked with `core.autocrlf=true`; the nested `c2000` worktree remains clean. Phase 0 is complete; Phase 1 may begin on `c2000`.
+
 ### Phase 1: Introduce The Octet Abstraction
 
 **Actions:** Add a Berry-owned octet type and conversion helpers. Replace core `uint8_t`/`int8_t` dependencies by intent: logical-octet storage, numeric 16/32/64-bit quantities, or signed-octet interpretation. Update `berry.h` and internal headers first. Do not add a project-wide `#define uint8_t`.
 
 **Pass criteria:** The target compiler builds a small API/type test that includes `berry.h`; test values 0, 1, 127, 128, 254, and 255 round-trip unchanged, while 256 truncates only where an API explicitly specifies octet wrapping. Signed conversions map 0x7F to 127, 0x80 to -128, and 0xFF to -1. Host builds remain unchanged and pass.
+
+**Execution status (2026-10-02): PASS.** On branch `c2000`, `berry.h` now defines `bbyte`/`bsbyte` as exact 8-bit types when `CHAR_BIT==8` and as 16-bit C storage types on the measured C28 target. `be_octet_from_u32()` explicitly masks to 0xFF; `be_octet_to_sbyte()` explicitly sign-extends logical octets. All Berry core `uint8_t`/`int8_t` uses have been converted by intent; the only remaining references are the conditional 8-bit-host typedefs in `berry.h`.
+
+The standalone `tests/c_octet_test.c` exercises truncation for 0..511 and signed interpretation for every value 0..255. It passes on the Windows host and Ubuntu WSL; TI C2000 22.6.1.LTS compiles the same test with `--c99` and the temporary target config. The 58 Berry `.be` regression tests also pass under the sanitizer-enabled Ubuntu host build. Target compile probes for `be_byteslib.c` and `be_bytecode.c` succeed with precompiled objects disabled; `be_vm.c` compiles but emits further C28 integer-shift warnings assigned to Phase 3.
+
+**Carry-forward limitations:** This phase does not establish bytecode/file interoperability or execute the octet test on the MCU. `be_mem.c` still has the known unsupported TI `ffs()` branch, and the focused `be_solidifylib.c` compile with precompiled objects disabled did not resolve `bntvmodobj`/`bntvmodule` declarations. Keep these as later compiler/generation gates; Phase 1's type abstraction and host regression criteria are met.
 
 ### Phase 2: Port Core Storage And Generated Objects
 
