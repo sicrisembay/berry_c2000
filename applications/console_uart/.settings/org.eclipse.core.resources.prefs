@@ -1,4 +1,10 @@
 eclipse.preferences.version=1
+encoding//Debug/components/berry/berry/default/subdir_rules.mk=UTF-8
+encoding//Debug/components/berry/berry/default/subdir_vars.mk=UTF-8
+encoding//Debug/components/berry/berry/src/subdir_rules.mk=UTF-8
+encoding//Debug/components/berry/berry/src/subdir_vars.mk=UTF-8
+encoding//Debug/components/berry/berry/subdir_rules.mk=UTF-8
+encoding//Debug/components/berry/berry/subdir_vars.mk=UTF-8
 encoding//Debug/components/drivers/DSP2833x_headers/v142/source/subdir_rules.mk=UTF-8
 encoding//Debug/components/drivers/DSP2833x_headers/v142/source/subdir_vars.mk=UTF-8
 encoding//Debug/components/drivers/uart/subdir_rules.mk=UTF-8

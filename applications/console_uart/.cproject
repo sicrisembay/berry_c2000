@@ -53,6 +53,7 @@
 									<listOptionValue builtIn="false" value="${CG_TOOL_ROOT}/include"/>
 									<listOptionValue builtIn="false" value="${workspace_loc:/${ProjName}/configs/generated}"/>
 									<listOptionValue builtIn="false" value="${workspace_loc:/${ProjName}/components}"/>
+											<listOptionValue builtIn="false" value="${workspace_loc:/${ProjName}/components/berry/berry/src}"/>
 									<listOptionValue builtIn="false" value="${workspace_loc:/${ProjName}/components/drivers/DSP2833x_headers/v142/include}"/>
 								</option>
 								<option id="com.ti.ccstudio.buildDefinitions.C2000_22.6.compilerID.ABI.1043944117" name="Application binary interface [See 'General' page to edit] (--abi)" superClass="com.ti.ccstudio.buildDefinitions.C2000_22.6.compilerID.ABI" useByScannerDiscovery="false" value="com.ti.ccstudio.buildDefinitions.C2000_22.6.compilerID.ABI.coffabi" valueType="enumerated"/>
@@ -102,7 +103,7 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
-						<entry excluding="components/berry|src" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+						<entry excluding="src|components/berry/berry/default/berry.c|components/berry/berry/default/be_port.c|components/berry/berry/default/*.o|components/berry/berry/src/be_oslib.c|components/berry/berry/src/be_timelib.c|components/berry/berry/src/*.o|components/berry/berry/tests" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>
