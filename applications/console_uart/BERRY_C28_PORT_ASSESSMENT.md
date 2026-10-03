@@ -125,6 +125,10 @@ After that fix, all 58 Berry `.be` tests passed again under the sanitizer-enable
 
 **Pass criteria:** Byte-buffer tests cover all 256 logical values, lengths and offsets at 0/1/end/end+1, signed boundaries, and 16/24/32-bit endian cases. Serialization round-trips a host-generated fixture only after the file API is separately ported; otherwise the feature remains disabled and the build proves no file/bytecode dependency is linked.
 
+**Execution status (2026-10-03): PASS.** The user ran build=28 through all three VM create/run/delete cycles. Tera Term reported `BERRY_PHASE5_OCTETS=PASS`, `BERRY_PHASE5_BOUNDS=PASS`, `BERRY_PHASE5_ENDIAN=PASS`, `BERRY_PHASE5_SLICE=PASS`, `BERRY_EXCEPTION_RECOVERY=PASS`, and final `BERRY_PHASE5=PASS`. Heap free space returned to 7,896/8,000 MAU after every VM deletion; the low-water free heap during the Phase 5 workload was 1,356 MAU, and peak task stack use was 729/2,048 MAU (about 36%). The full host bytes suite and all 58 ASan/UBSan tests pass. Filesystem and bytecode persistence remain disabled.
+
+**Phase 5 allocation findings:** The reported build=17 run exhausted the 8,000-MAU heap after repeated appends; build=24 failed compiling its long bytes script with a 772-MAU allocation request. Subsequent builds reduce heap pressure using preallocation, short script buffers, direct C buffer verification, and GC between stages. The build=28 approach passed on the MCU; its Phase 5 results and memory high-water figures are recorded above.
+
 ### Phase 6: Integrate Into SYS/BIOS And Measure
 
 **Actions:** Add Berry to the application-owned C28 port/config, start one VM in one SYS/BIOS task, and route output/input through UART-A in task context. Configure and test a thread-safe allocator and dedicated task stack. Build cleanly and inspect the link map after each feature is enabled.

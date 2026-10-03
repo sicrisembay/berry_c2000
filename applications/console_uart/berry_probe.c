@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "berry.h"
+#include "be_gc.h"
 
 static Char berry_probe_stack[2048];
 static Memory_Size berry_heap_low_water = (Memory_Size)-1;
@@ -67,6 +68,67 @@ static int berry_probe_raise_expected(bvm *vm)
     return 0;
 }
 
+static int berry_probe_fill_octets_impl(bvm *vm)
+{
+    bbyte *buffer;
+    int index;
+
+    if (!be_getglobal(vm, "phase5_octets")) {
+        be_pop(vm, 1);
+        return 1;
+    }
+    if (!be_getmember(vm, -1, ".p") || !be_iscomptr(vm, -1)) {
+        be_pop(vm, 2);
+        return 2;
+    }
+    buffer = (bbyte*)be_tocomptr(vm, -1);
+    for (index = 0; index < 256; ++index) {
+        buffer[index] = be_octet_from_u32((uint32_t)index);
+    }
+    be_pop(vm, 2);
+    return 0;
+}
+
+static int berry_probe_fill_octets(bvm *vm)
+{
+    be_pushint(vm, berry_probe_fill_octets_impl(vm));
+    be_return(vm);
+}
+
+static int berry_probe_verify_octets_impl(bvm *vm)
+{
+    bbyte *buffer;
+    int index;
+
+    if (!be_getglobal(vm, "phase5_octets")) {
+        be_pop(vm, 1);
+        return 1;
+    }
+    if (!be_getmember(vm, -1, ".p")) {
+        be_pop(vm, 2);
+        return 2;
+    }
+    if (!be_iscomptr(vm, -1)) {
+        be_pop(vm, 2);
+        return 3;
+    }
+    buffer = (bbyte*)be_tocomptr(vm, -1);
+    for (index = 0; index < 256; ++index) {
+        if (((uint16_t)buffer[index] & 0xFFu) != (uint16_t)index) {
+            be_pop(vm, 2);
+            return 4;
+        }
+    }
+    be_pop(vm, 2);
+    return 0;
+}
+
+static int berry_probe_verify_octets(bvm *vm)
+{
+    be_pushint(vm, berry_probe_verify_octets_impl(vm));
+    be_return(vm);
+}
+
 static int berry_probe_run_source(bvm *vm, const char *source,
     const char *stage, int cycle)
 {
@@ -97,6 +159,60 @@ static Void berry_probe_task(UArg arg0, UArg arg1)
         "assert(phase4_global + 1 == 42)\n"
         "assert(1 + 2 == 3)\n"
         "print('BERRY_PHASE4_SCRIPT=PASS')\n";
+    static const char octets_script[] =
+        "var phase5_octets = bytes()\n"
+        "phase5_octets.resize(256)\n"
+        "assert(phase5_fill_octets() == 0)\n"
+        "assert(phase5_verify_octets() == 0)\n"
+        "assert(phase5_octets.size() == 256)\n"
+        "print('BERRY_PHASE5_OCTETS=PASS')\n";
+    static const char bounds_script[] =
+        "assert(phase5_octets.get(0) == 0)\n"
+        "assert(phase5_octets.get(255) == 255)\n"
+        "assert(phase5_octets.get(-1) == 255)\n"
+        "assert(phase5_octets.get(256) == 0)\n"
+        "assert(phase5_octets.get(255, 2) == 0)\n"
+        "phase5_octets.set(255, 0x1FF)\n"
+        "assert(phase5_octets.get(255) == 255)\n"
+        "var phase5_add = bytes()\n"
+        "phase5_add.add(0x1FF)\n"
+        "assert(phase5_add.tohex() == 'FF')\n"
+        "phase5_octets = nil\n"
+        "print('BERRY_PHASE5_BOUNDS=PASS')\n";
+    static const char endian_script[] =
+        "var phase5_endian = bytes()\n"
+        "phase5_endian.resize(4)\n"
+        "phase5_endian.set(0, 0x1234, 2)\n"
+        "assert(phase5_endian.tohex() == '34120000')\n"
+        "assert(phase5_endian.get(0, 2) == 0x1234)\n"
+        "phase5_endian.set(0, 0x1234, -2)\n"
+        "assert(phase5_endian.tohex() == '12340000')\n"
+        "assert(phase5_endian.get(0, -2) == 0x1234)\n"
+        "phase5_endian.set(0, 0x123456, 3)\n"
+        "assert(phase5_endian.tohex() == '56341200')\n"
+        "assert(phase5_endian.get(0, 3) == 0x123456)\n"
+        "phase5_endian.set(0, 0x123456, -3)\n"
+        "assert(phase5_endian.tohex() == '12345600')\n"
+        "assert(phase5_endian.get(0, -3) == 0x123456)\n"
+        "phase5_endian.set(0, 0x12345678, 4)\n"
+        "assert(phase5_endian.tohex() == '78563412')\n"
+        "assert(phase5_endian.get(0, 4) == 0x12345678)\n"
+        "phase5_endian.set(0, 0x12345678, -4)\n"
+        "assert(phase5_endian.tohex() == '12345678')\n"
+        "assert(phase5_endian.get(0, -4) == 0x12345678)\n"
+        "phase5_endian.set(0, 0x80, 1)\n"
+        "assert(phase5_endian.geti(0, 1) == -128)\n"
+        "phase5_endian.set(0, 0x8000, 2)\n"
+        "assert(phase5_endian.geti(0, 2) == -32768)\n"
+        "phase5_endian.set(0, 0x800000, 3)\n"
+        "assert(phase5_endian.geti(0, 3) == -8388608)\n"
+        "print('BERRY_PHASE5_ENDIAN=PASS')\n";
+    static const char slice_script[] =
+        "var phase5_sample = bytes('001122334455')\n"
+        "assert(phase5_sample[0..2] == bytes('001122'))\n"
+        "assert(phase5_sample[1..2] == bytes('1122'))\n"
+        "assert(phase5_sample.copy() == phase5_sample)\n"
+        "print('BERRY_PHASE5_SLICE=PASS')\n";
     static const char exception_script[] =
         "phase4_raise()\n";
     static const char recovery_script[] =
@@ -106,13 +222,19 @@ static Void berry_probe_task(UArg arg0, UArg arg1)
 
     (void)arg0;
     (void)arg1;
-    BERRY_LOG("BERRY_PHASE4=START build=11 cycles=%d\r\n", berry_probe_cycles);
+    BERRY_LOG("BERRY_PHASE5=START build=28 cycles=%d\r\n", berry_probe_cycles);
     for (cycle = 1; cycle <= berry_probe_cycles; ++cycle) {
         bvm *vm;
         int api_result;
+        int octets_result;
+        int bounds_result;
+        int endian_result;
+        int slice_result;
+        int bytes_result;
         int script_result;
         int exception_result;
         int recovery_result;
+        bbool exception_expected = bfalse;
 
         BERRY_LOG("BERRY_CYCLE=%d_START\r\n", cycle);
         berry_probe_report_usage(cycle, "before_vm");
@@ -124,39 +246,74 @@ static Void berry_probe_task(UArg arg0, UArg arg1)
         BERRY_LOG("BERRY_VM=CREATED cycle=%d\r\n", cycle);
         berry_probe_report_usage(cycle, "after_vm");
         be_regfunc(vm, "phase4_raise", berry_probe_raise_expected);
+        be_regfunc(vm, "phase5_fill_octets", berry_probe_fill_octets);
+        be_regfunc(vm, "phase5_verify_octets", berry_probe_verify_octets);
 
         api_result = berry_probe_test_string_api(vm);
         BERRY_LOG("BERRY_STRING_API=%s code=%d cycle=%d\r\n",
             api_result == 0 ? "PASS" : "FAIL", api_result, cycle);
-        script_result = berry_probe_run_source(vm, script, "BERRY_SCRIPT", cycle);
+
+        octets_result = berry_probe_run_source(vm, octets_script, "BERRY_OCTETS", cycle);
+        BERRY_LOG("BERRY_OCTETS=DONE code=%d cycle=%d\r\n", octets_result, cycle);
+        bounds_result = octets_result == BE_OK
+            ? berry_probe_run_source(vm, bounds_script, "BERRY_BOUNDS", cycle)
+            : octets_result;
+        BERRY_LOG("BERRY_BOUNDS=DONE code=%d cycle=%d\r\n", bounds_result, cycle);
+        if (bounds_result == BE_OK) {
+            be_gc_collect(vm);
+        }
+        endian_result = bounds_result == BE_OK
+            ? berry_probe_run_source(vm, endian_script, "BERRY_ENDIAN", cycle)
+            : bounds_result;
+        BERRY_LOG("BERRY_ENDIAN=DONE code=%d cycle=%d\r\n", endian_result, cycle);
+        if (endian_result == BE_OK) {
+            be_gc_collect(vm);
+        }
+        slice_result = endian_result == BE_OK
+            ? berry_probe_run_source(vm, slice_script, "BERRY_SLICE", cycle)
+            : endian_result;
+        BERRY_LOG("BERRY_SLICE=DONE code=%d cycle=%d\r\n", slice_result, cycle);
+        if (slice_result == BE_OK) {
+            be_gc_collect(vm);
+            BERRY_LOG("BERRY_PHASE5_BYTES=PASS cycle=%d\r\n", cycle);
+        }
+        bytes_result = slice_result;
+        script_result = bytes_result == BE_OK
+            ? berry_probe_run_source(vm, script, "BERRY_SCRIPT", cycle)
+            : bytes_result;
         BERRY_LOG("BERRY_SCRIPT=DONE code=%d cycle=%d\r\n", script_result, cycle);
         exception_result = script_result == BE_OK
             ? berry_probe_run_source(vm, exception_script, "BERRY_EXCEPTION", cycle)
             : script_result;
         BERRY_LOG("BERRY_EXCEPTION=DONE code=%d cycle=%d\r\n", exception_result, cycle);
         if (exception_result == BE_EXCEPTION) {
+            exception_expected = be_isstring(vm, -2)
+                && strcmp(be_tostring(vm, -2), "internal_error") == 0;
             be_dumpexcept(vm);
-            BERRY_LOG("BERRY_EXCEPTION=PASS cycle=%d\r\n", cycle);
+            if (exception_expected) {
+                BERRY_LOG("BERRY_EXCEPTION=PASS cycle=%d\r\n", cycle);
+            }
         }
-        recovery_result = exception_result == BE_OK
+        recovery_result = exception_expected
             ? berry_probe_run_source(vm, recovery_script, "BERRY_RECOVERY", cycle)
-            : (exception_result == BE_EXCEPTION
-                ? berry_probe_run_source(vm, recovery_script, "BERRY_RECOVERY", cycle)
-                : exception_result);
+            : BE_EXEC_ERROR;
         BERRY_LOG("BERRY_RECOVERY=DONE code=%d cycle=%d\r\n", recovery_result, cycle);
-        berry_probe_report_usage(cycle, "after_phase4");
-        if (script_result != BE_OK || exception_result != BE_EXCEPTION || recovery_result != BE_OK) {
-            BERRY_LOG("BERRY_PHASE4=FAIL cycle=%d\r\n", cycle);
-            be_dumpexcept(vm);
+        berry_probe_report_usage(cycle, "after_phase5");
+        if (script_result != BE_OK || bytes_result != BE_OK || octets_result != BE_OK ||
+            bounds_result != BE_OK || endian_result != BE_OK || slice_result != BE_OK ||
+            exception_result != BE_EXCEPTION || recovery_result != BE_OK) {
+            BERRY_LOG("BERRY_PHASE5=FAIL cycle=%d\r\n", cycle);
         }
         be_vm_delete(vm);
         berry_probe_report_usage(cycle, "after_vm_delete");
-        if (api_result != 0 || script_result != BE_OK || exception_result != BE_EXCEPTION || recovery_result != BE_OK) {
+        if (api_result != 0 || script_result != BE_OK || bytes_result != BE_OK ||
+            octets_result != BE_OK || bounds_result != BE_OK || endian_result != BE_OK ||
+            slice_result != BE_OK || exception_result != BE_EXCEPTION || recovery_result != BE_OK) {
             return;
         }
         BERRY_LOG("BERRY_CYCLE=%d_PASS\r\n", cycle);
     }
-    BERRY_LOG("BERRY_PHASE4=PASS\r\n");
+    BERRY_LOG("BERRY_PHASE5=PASS\r\n");
 }
 
 void BerryProbe_start(void)
