@@ -1,6 +1,6 @@
 # Integrating Berry with console_uart
 
-This is an implementation guide, not a description of an integration that already builds. `console_uart` is a CCS/SYS/BIOS project for the TMS320F28335; its current `main()` initializes UART and starts BIOS. Berry is vendored at `components/berry/berry`. Keep the interpreter on a BIOS task, with UART interrupts restricted to the existing driver.
+This guide records the implementation and target-acceptance workflow for `console_uart`, a CCS/SYS/BIOS project for the TMS320F28335. The Berry C28 core and Phase 1-5 checks are built and MCU-tested; Phase 6 now adds a dedicated SYS/BIOS console task and UART REPL. The CCS Debug image builds, but Phase 6 runtime and sustained-load acceptance remain pending. See [BERRY_C28_PORT_ASSESSMENT.md](BERRY_C28_PORT_ASSESSMENT.md) for measured port results. Berry is vendored at `components/berry/berry`; keep the interpreter on a single-owner BIOS task, with UART interrupts restricted to the existing driver.
 
 ## Actionable Execution Plan
 
@@ -127,6 +127,6 @@ This is the task body, not a replacement for `main()` or a complete port. Once t
 
 1. From `applications/console_uart`, run `make defconfig` if `configs/generated/autoconf.h` is absent; this requires the Kconfig `defconfig` and `genconfig` commands used by `configs/Makefile`. Generate Berry headers separately as in step 2.
 2. Build the **Debug** CCS configuration; inspect the compile log for exactly one copy of each selected Berry source and the application port, and inspect the link map for `.text`, `.econst`, `.ebss`, `.esysmem`, and task-stack pressure. Resolve any compiler/data-model diagnostics before flashing.
-3. Load through the configured XDS100v2 target, connect UART-A at 115200 8N1, and check that the in-memory test prints `Berry ready`. Then test arithmetic, strings, an invalid script/error path, repeated commands, RX overflow behavior, and allocation failure/recovery.
+3. Load through the configured XDS100v2 target, connect UART-A at 115200 8N1, and check for `BERRY_PHASE5=PASS`, `Berry ready`, and the `> ` prompt. The allocator stress marker is reported at a subsequent prompt after it completes. Test `1 + 2`, an invalid script followed by `40 + 2`, multiline input, and `print(input('input> '))` with a line longer than 100 characters to exercise chunking. Also test empty input, CR, LF, CRLF, backspace, and a line longer than 254 logical octets; confirm the rejected line does not execute a prefix and the next valid command works. Run repeated allocations/GC and sustained UART commands while observing heap and task stack high-water marks.
 
-This repository does not contain a completed C28 Berry port or an automated target build, so these steps require hardware/toolchain verification; the 16-bit-`char` compatibility work is the main feasibility gate.
+The selected Berry core and CCS Debug build are available in this repository, and the 16-bit-`char` feasibility work has passed the earlier MCU gates. The Phase 6 REPL, allocator, UART line handling, RX-burst, and 200-command GC/traffic checks have passed on the F28335; see [BERRY_C28_PORT_ASSESSMENT.md](BERRY_C28_PORT_ASSESSMENT.md) for the measured results and image map. The exercised target workload passes, while a longer-duration product soak remains advisable.

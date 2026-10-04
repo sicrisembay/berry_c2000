@@ -24,37 +24,90 @@ BERRY_API void be_writebuffer(const char *buffer, size_t length)
 BERRY_API char* be_readstring(char *buffer, size_t size)
 {
     static bbool skip_lf = bfalse;
-    size_t length = 0;
+    static Char pending[32];
+    static UInt16 pending_count = 0;
+    static UInt16 pending_index = 0;
+    static char input_line[256];
+    static size_t input_line_length = 0;
+    static size_t input_line_offset = 0;
+    static bbool input_line_ready = bfalse;
+    size_t count;
+
     if (buffer == NULL || size == 0) {
         return NULL;
     }
-    for (;;) {
-        Char received;
-        if (UART_receive(UART_A, &received, 1) == 0) {
-            Task_yield();
-            continue;
-        }
-        if (skip_lf) {
-            skip_lf = bfalse;
-            if (received == '\n') {
+    if (size == 1) {
+        buffer[0] = '\0';
+        return NULL;
+    }
+    if (!input_line_ready) {
+        bbool overflow = bfalse;
+
+        input_line_length = 0;
+        for (;;) {
+            Char received;
+
+            if (pending_index == pending_count) {
+                pending_count = UART_receive(UART_A, pending,
+                    (UInt16)(sizeof(pending) / sizeof(pending[0])));
+                pending_index = 0;
+                if (pending_count == 0) {
+                    Task_sleep(1);
+                    continue;
+                }
+            }
+            received = pending[pending_index++];
+            if (skip_lf) {
+                skip_lf = bfalse;
+                if (received == '\n') {
+                    continue;
+                }
+            }
+            if (received == '\r' || received == '\n') {
+                skip_lf = received == '\r' ? btrue : bfalse;
+                be_writebuffer("\r\n", 2);
+                if (overflow) {
+                    input_line[0] = '\n';
+                    input_line_length = 1;
+                    be_writebuffer("[Berry: input line too long]\r\n", 30);
+                } else {
+                    input_line[input_line_length++] = '\n';
+                }
+                input_line[input_line_length] = '\0';
+                input_line_ready = btrue;
+                break;
+            }
+            if (received == '\b' || received == 0x7F) {
+                if (input_line_length > 0 && !overflow) {
+                    --input_line_length;
+                    be_writebuffer("\b \b", 3);
+                }
                 continue;
             }
-        }
-        if (received == '\r' || received == '\n') {
-            skip_lf = received == '\r' ? btrue : bfalse;
-            break;
-        }
-        if (received == '\b' || received == 0x7F) {
-            if (length > 0) {
-                --length;
+            if (received == 0 || overflow) {
+                continue;
             }
-            continue;
-        }
-        if (length + 1 < size) {
-            buffer[length++] = (char)((uint16_t)received & 0xFFu);
+            if (input_line_length < sizeof(input_line) - 2) {
+                char echo = (char)((uint16_t)received & 0xFFu);
+                input_line[input_line_length++] = echo;
+                be_writebuffer(&echo, 1);
+            } else {
+                overflow = btrue;
+            }
         }
     }
-    buffer[length] = '\0';
+
+    count = input_line_length - input_line_offset;
+    if (count >= size) {
+        count = size - 1;
+    }
+    memcpy(buffer, input_line + input_line_offset, count);
+    buffer[count] = '\0';
+    input_line_offset += count;
+    if (input_line_offset == input_line_length) {
+        input_line_offset = 0;
+        input_line_ready = bfalse;
+    }
     return buffer;
 }
 

@@ -11,7 +11,7 @@
 extern unsigned int RamfuncsLoadStart;
 extern unsigned int RamfuncsLoadEnd;
 extern unsigned int RamfuncsRunStart;
-extern void BerryProbe_start(void);
+extern void BerryConsole_start(void);
 
 static bool bInitDone = false;
 
@@ -191,7 +191,7 @@ Int main()
     UART_init();
 
     System_printf("Hello World");
-    BerryProbe_start();
+    BerryConsole_start();
 
     BIOS_start();    /* does not return */
     return(0);

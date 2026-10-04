@@ -3,12 +3,19 @@
 #include <xdc/runtime/Memory.h>
 #include <xdc/runtime/System.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include "berry.h"
 #include "be_gc.h"
+#include "be_repl.h"
 
-static Char berry_probe_stack[2048];
+static Char berry_console_stack[2048];
+static Char berry_allocator_stack[512];
+static char berry_console_line[256];
+static bvm *berry_console_vm = NULL;
 static Memory_Size berry_heap_low_water = (Memory_Size)-1;
+static volatile int berry_allocator_result = -1;
+static volatile UInt16 berry_allocator_stack_peak = 0;
 static const int berry_probe_cycles = 3;
 
 #define BERRY_LOG_DRAIN_TICKS 16
@@ -129,6 +136,138 @@ static int berry_probe_verify_octets(bvm *vm)
     be_return(vm);
 }
 
+static char *berry_console_getline(const char *prompt)
+{
+    static unsigned int prompt_count = 0;
+    static bbool allocator_result_reported = bfalse;
+    size_t length;
+
+    if (berry_console_vm != NULL) {
+        be_gc_collect(berry_console_vm);
+    }
+    if (!allocator_result_reported && berry_allocator_result >= 0) {
+        BERRY_LOG("BERRY_ALLOCATOR_STRESS=%s code=%d stack_peak_mau=%u stack_size_mau=%u\r\n",
+            berry_allocator_result == 0 ? "PASS" : "FAIL",
+            berry_allocator_result,
+            (unsigned int)berry_allocator_stack_peak,
+            (unsigned int)(sizeof(berry_allocator_stack) / sizeof(berry_allocator_stack[0])));
+        allocator_result_reported = btrue;
+    }
+    if ((++prompt_count & 0x0Fu) == 0) {
+        berry_probe_report_usage(0, "console_sustained");
+    }
+    be_writebuffer(prompt, strlen(prompt));
+    if (be_readstring(berry_console_line, sizeof(berry_console_line)) == NULL) {
+        return NULL;
+    }
+    length = strlen(berry_console_line);
+    if (length > 0 && berry_console_line[length - 1] == '\n') {
+        berry_console_line[--length] = '\0';
+    }
+    if (length == 0) {
+        strcpy(berry_console_line, "nil");
+    }
+    return berry_console_line;
+}
+
+static Void berry_allocator_stress_task(UArg arg0, UArg arg1)
+{
+    Task_Stat task_stats;
+    int iteration;
+    int result = 0;
+
+    (void)arg0;
+    (void)arg1;
+    for (iteration = 0; iteration < 256; ++iteration) {
+        size_t original_size = 16u + (size_t)(iteration & 31);
+        size_t expanded_size = original_size + 8u;
+        Char *block = (Char*)malloc(original_size);
+        Char *expanded;
+        size_t index;
+
+        if (block == NULL) {
+            result = 1;
+            break;
+        }
+        for (index = 0; index < original_size; ++index) {
+            block[index] = (Char)(iteration & 0xFF);
+        }
+        Task_sleep(1);
+        expanded = (Char*)realloc(block, expanded_size);
+        if (expanded == NULL) {
+            free(block);
+            result = 2;
+            break;
+        }
+        for (index = 0; index < original_size; ++index) {
+            if ((uint16_t)expanded[index] != (uint16_t)(iteration & 0xFF)) {
+                result = 3;
+                break;
+            }
+        }
+        free(expanded);
+        if (result != 0) {
+            break;
+        }
+    }
+    Task_stat(Task_self(), &task_stats);
+    berry_allocator_stack_peak = (UInt16)task_stats.used;
+    berry_allocator_result = result;
+}
+
+static void berry_allocator_stress_start(void)
+{
+    Task_Params params;
+    Error_Block error;
+
+    Task_Params_init(&params);
+    params.stack = berry_allocator_stack;
+    params.stackSize = sizeof(berry_allocator_stack);
+    params.priority = 2;
+    params.instance->name = "berryAllocatorTest";
+    berry_allocator_result = -1;
+    berry_allocator_stack_peak = 0;
+    Error_init(&error);
+    if (Task_create(berry_allocator_stress_task, &params, &error) == NULL) {
+        berry_allocator_result = 4;
+    }
+}
+
+static void berry_console_diagnose_call(bvm *vm, const char *source,
+    const char *stage)
+{
+    int result = be_loadstring(vm, source);
+
+    BERRY_LOG("BERRY_DIAG_%s_LOAD=%d top=%d\r\n", stage, result, be_top(vm));
+    if (result != BE_OK) {
+        if (result == BE_EXCEPTION && be_top(vm) >= 2) {
+            const char *exception = be_tostring(vm, -2);
+            const char *message = be_tostring(vm, -1);
+            BERRY_LOG("BERRY_DIAG_%s_LOAD_ERROR=%s message=%s\r\n",
+                stage, exception, message);
+            be_pop(vm, 2);
+        }
+        return;
+    }
+    result = be_pcall(vm, 0);
+    if (result == BE_OK) {
+        int is_integer = be_isint(vm, -1);
+        int value = is_integer ? (int)be_toint(vm, -1) : 0;
+        BERRY_LOG("BERRY_DIAG_%s_CALL=%d top=%d nil=%d int=%d value=%d\r\n",
+            stage, result, be_top(vm), be_isnil(vm, -1), is_integer, value);
+        be_pop(vm, 1);
+    } else if (result == BE_EXCEPTION) {
+        const char *exception = be_tostring(vm, -2);
+        const char *message = be_tostring(vm, -1);
+        BERRY_LOG("BERRY_DIAG_%s_CALL=%d top=%d exception=%s message=%s\r\n",
+            stage, result, be_top(vm), exception, message);
+        be_pop(vm, 2);
+    } else {
+        BERRY_LOG("BERRY_DIAG_%s_CALL=%d top=%d\r\n",
+            stage, result, be_top(vm));
+    }
+}
+
 static int berry_probe_run_source(bvm *vm, const char *source,
     const char *stage, int cycle)
 {
@@ -145,7 +284,7 @@ static int berry_probe_run_source(bvm *vm, const char *source,
     return result;
 }
 
-static Void berry_probe_task(UArg arg0, UArg arg1)
+static Void berry_console_task(UArg arg0, UArg arg1)
 {
     static const char script[] =
         "var ascii = \"Berry C28\"\n"
@@ -314,22 +453,52 @@ static Void berry_probe_task(UArg arg0, UArg arg1)
         BERRY_LOG("BERRY_CYCLE=%d_PASS\r\n", cycle);
     }
     BERRY_LOG("BERRY_PHASE5=PASS\r\n");
+
+    {
+        bvm *vm;
+        int result;
+
+        berry_heap_low_water = (Memory_Size)-1;
+        berry_probe_report_usage(0, "console_before_vm");
+        vm = be_vm_new();
+        if (vm == NULL) {
+            BERRY_LOG("BERRY_CONSOLE=VM_CREATE_FAIL\r\n");
+            return;
+        }
+        berry_probe_report_usage(0, "console_vm_created");
+        result = be_dostring(vm, "print('Berry ready')");
+        if (result != BE_OK) {
+            BERRY_LOG("BERRY_CONSOLE=SMOKE_FAIL code=%d\r\n", result);
+            be_dumpexcept(vm);
+            be_vm_delete(vm);
+            return;
+        }
+        berry_probe_report_usage(0, "console_smoke");
+        berry_console_diagnose_call(vm, "return (40 + 2)", "EXPR");
+        berry_console_diagnose_call(vm, "assert(false, 'ASSERT_PROBE')", "EXCEPTION");
+        be_gc_collect(vm);
+        BERRY_LOG("BERRY_CONSOLE=READY\r\n");
+        berry_console_vm = vm;
+        berry_allocator_stress_start();
+        result = be_repl(vm, berry_console_getline, NULL);
+        berry_console_vm = NULL;
+        BERRY_LOG("BERRY_CONSOLE=REPL_EXIT code=%d\r\n", result);
+        be_vm_delete(vm);
+    }
 }
 
-void BerryProbe_start(void)
+void BerryConsole_start(void)
 {
     Task_Params params;
     Error_Block error;
-    Task_Handle task;
 
     Task_Params_init(&params);
-    params.stack = berry_probe_stack;
-    params.stackSize = sizeof(berry_probe_stack);
+    params.stack = berry_console_stack;
+    params.stackSize = sizeof(berry_console_stack);
     params.priority = 1;
-    params.instance->name = "berryProbe";
+    params.instance->name = "berryConsole";
     Error_init(&error);
-    task = Task_create(berry_probe_task, &params, &error);
-    if (task == NULL) {
-        System_printf("BERRY_TASK_CREATE=FAIL\r\n");
+    if (Task_create(berry_console_task, &params, &error) == NULL) {
+        System_printf("BERRY_CONSOLE=TASK_CREATE_FAIL\r\n");
     }
 }
