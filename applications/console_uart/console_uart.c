@@ -190,7 +190,6 @@ Int main()
     CORE_init();
     UART_init();
 
-    System_printf("Hello World");
     BerryConsole_start();
 
     BIOS_start();    /* does not return */

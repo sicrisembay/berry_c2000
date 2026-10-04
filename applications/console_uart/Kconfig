@@ -1,3 +1,7 @@
 mainmenu "Console Uart"
 
+config BERRY_STARTUP_DIAGNOSTICS
+	bool "Run Berry C28 startup diagnostics"
+	default n
+
 rsource ../../components/drivers/Kconfig

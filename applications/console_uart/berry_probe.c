@@ -2,6 +2,7 @@
 #include <xdc/runtime/Error.h>
 #include <xdc/runtime/Memory.h>
 #include <xdc/runtime/System.h>
+#include "autoconf.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,13 +11,15 @@
 #include "be_repl.h"
 
 static Char berry_console_stack[2048];
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
 static Char berry_allocator_stack[512];
-static char berry_console_line[256];
-static bvm *berry_console_vm = NULL;
 static Memory_Size berry_heap_low_water = (Memory_Size)-1;
 static volatile int berry_allocator_result = -1;
 static volatile UInt16 berry_allocator_stack_peak = 0;
 static const int berry_probe_cycles = 3;
+#endif
+static char berry_console_line[256];
+static bvm *berry_console_vm = NULL;
 
 #define BERRY_LOG_DRAIN_TICKS 16
 #define BERRY_LOG(...) do { \
@@ -24,6 +27,7 @@ static const int berry_probe_cycles = 3;
     Task_sleep(BERRY_LOG_DRAIN_TICKS); \
 } while (0)
 
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
 static void berry_probe_report_usage(int cycle, const char *stage)
 {
     Memory_Stats heap_stats;
@@ -135,16 +139,20 @@ static int berry_probe_verify_octets(bvm *vm)
     be_pushint(vm, berry_probe_verify_octets_impl(vm));
     be_return(vm);
 }
+#endif
 
 static char *berry_console_getline(const char *prompt)
 {
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
     static unsigned int prompt_count = 0;
     static bbool allocator_result_reported = bfalse;
+#endif
     size_t length;
 
     if (berry_console_vm != NULL) {
         be_gc_collect(berry_console_vm);
     }
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
     if (!allocator_result_reported && berry_allocator_result >= 0) {
         BERRY_LOG("BERRY_ALLOCATOR_STRESS=%s code=%d stack_peak_mau=%u stack_size_mau=%u\r\n",
             berry_allocator_result == 0 ? "PASS" : "FAIL",
@@ -156,6 +164,7 @@ static char *berry_console_getline(const char *prompt)
     if ((++prompt_count & 0x0Fu) == 0) {
         berry_probe_report_usage(0, "console_sustained");
     }
+#endif
     be_writebuffer(prompt, strlen(prompt));
     if (be_readstring(berry_console_line, sizeof(berry_console_line)) == NULL) {
         return NULL;
@@ -170,6 +179,7 @@ static char *berry_console_getline(const char *prompt)
     return berry_console_line;
 }
 
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
 static Void berry_allocator_stress_task(UArg arg0, UArg arg1)
 {
     Task_Stat task_stats;
@@ -283,9 +293,11 @@ static int berry_probe_run_source(bvm *vm, const char *source,
     BERRY_LOG("%s_CALL=DONE code=%d cycle=%d\r\n", stage, result, cycle);
     return result;
 }
+#endif
 
 static Void berry_console_task(UArg arg0, UArg arg1)
 {
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
     static const char script[] =
         "var ascii = \"Berry C28\"\n"
         "assert(ascii == \"Berry C28\")\n"
@@ -358,9 +370,11 @@ static Void berry_console_task(UArg arg0, UArg arg1)
         "assert(40 + 2 == 42)\n"
         "print('BERRY_EXCEPTION_RECOVERY=PASS')\n";
     int cycle;
+#endif
 
     (void)arg0;
     (void)arg1;
+#if CONFIG_BERRY_STARTUP_DIAGNOSTICS
     BERRY_LOG("BERRY_PHASE5=START build=28 cycles=%d\r\n", berry_probe_cycles);
     for (cycle = 1; cycle <= berry_probe_cycles; ++cycle) {
         bvm *vm;
@@ -453,19 +467,24 @@ static Void berry_console_task(UArg arg0, UArg arg1)
         BERRY_LOG("BERRY_CYCLE=%d_PASS\r\n", cycle);
     }
     BERRY_LOG("BERRY_PHASE5=PASS\r\n");
+#endif
 
     {
         bvm *vm;
         int result;
 
+    #if CONFIG_BERRY_STARTUP_DIAGNOSTICS
         berry_heap_low_water = (Memory_Size)-1;
         berry_probe_report_usage(0, "console_before_vm");
+    #endif
         vm = be_vm_new();
         if (vm == NULL) {
             BERRY_LOG("BERRY_CONSOLE=VM_CREATE_FAIL\r\n");
             return;
         }
+    #if CONFIG_BERRY_STARTUP_DIAGNOSTICS
         berry_probe_report_usage(0, "console_vm_created");
+    #endif
         result = be_dostring(vm, "print('Berry ready')");
         if (result != BE_OK) {
             BERRY_LOG("BERRY_CONSOLE=SMOKE_FAIL code=%d\r\n", result);
@@ -473,13 +492,17 @@ static Void berry_console_task(UArg arg0, UArg arg1)
             be_vm_delete(vm);
             return;
         }
+    #if CONFIG_BERRY_STARTUP_DIAGNOSTICS
         berry_probe_report_usage(0, "console_smoke");
         berry_console_diagnose_call(vm, "return (40 + 2)", "EXPR");
         berry_console_diagnose_call(vm, "assert(false, 'ASSERT_PROBE')", "EXCEPTION");
         be_gc_collect(vm);
+    #endif
         BERRY_LOG("BERRY_CONSOLE=READY\r\n");
         berry_console_vm = vm;
+    #if CONFIG_BERRY_STARTUP_DIAGNOSTICS
         berry_allocator_stress_start();
+    #endif
         result = be_repl(vm, berry_console_getline, NULL);
         berry_console_vm = NULL;
         BERRY_LOG("BERRY_CONSOLE=REPL_EXIT code=%d\r\n", result);
